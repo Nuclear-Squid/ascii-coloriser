@@ -4,11 +4,7 @@ use itertools::izip;    // zip more than 2 iterators
 use colored::Colorize;  // 'cause why not
 
 fn get_contents(file: &String) -> String {
-    if file != "" {
-        fs::read_to_string(file).expect(format!("Couldn't read from file `{}`", file).as_str())
-    } else {
-        String::from("")
-    }
+    fs::read_to_string(file).expect(format!("Couldn't read from file `{}`", file).as_str())
 }
 
 fn nb_chars(text: &String) -> usize {
@@ -16,58 +12,43 @@ fn nb_chars(text: &String) -> usize {
     text_as_vec.len()
 }
 
-fn max(x: i32, y: i32) -> i32 {
-    if x > y {
-        x
+fn all_strings_same_length(input: Vec<&String>) -> Result<(), String> {
+    assert!(!input.is_empty());
+    let lenghts: Vec<usize> = input.iter().map(|x| nb_chars(x)).collect();
+
+    if lenghts.iter().min() == lenghts.iter().max() {
+        Ok(())
     } else {
-        y
-    }
-}
-
-fn get_padded_contents(file1: &String, file2: &String, file3: &String) -> (String, String, String) {
-    fn pad (text: &String, n: i32) -> String {
-        let mut rv_text = text.clone();
-        for _ in 0..n {
-            rv_text.push_str(" ");
+        let mut rv_string = String::new();
+        let mut i = 1;
+        for l in lenghts.iter() {
+            rv_string.push_str(format!("Lenght of string n°{} : {}\n", i, l).as_str());
+            i += 1;
         };
-        rv_text
+        Err(rv_string)
     }
-
-    let files_contents: [String; 3] = [file1, file2, file3].map(|x| get_contents(&x));
-    let max_len = files_contents.clone().map(|x| nb_chars(&x)).iter().fold(0, |acc, x| max(acc, *x as i32));
-
-    let mut trucated_contents: Vec<String> = vec![];
-    for mut x in files_contents.clone().into_iter() {
-        x.pop();
-        trucated_contents.push(x);
-    }
-
-    let mut padded_contents: Vec<String> = vec![];
-    for x in trucated_contents.clone().into_iter() {
-        padded_contents.push(pad(&x, max_len - (nb_chars(&x) as i32) - 1));
-    };
-
-    let out1 = padded_contents[0].clone();
-    let out2 = padded_contents[1].clone();
-    let out3 = padded_contents[2].clone();
-
-    (out1, out2, out3)
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let ((base_ascii_art, fg_color_map, bg_color_map), out_file) = {
+    let (base_ascii_art, fg_color_map, maybe_bg_color_map, out_file) = {
         match args.len() {
-            4 => (get_padded_contents(&args[1], &args[2], &String::from("")), args[3].clone()),
-            5 => (get_padded_contents(&args[1], &args[2], &args[3]), args[4].clone()),
+            4 => (get_contents(&args[1]), get_contents(&args[2]), None, &args[3]),
+            5 => (get_contents(&args[1]), get_contents(&args[2]), Some(get_contents(&args[3])), &args[4]),
             _ => panic!("Wrong number of arguments, here's the correct syntax:
     ascii_coloriser <base_ascii_art> <fg_color_map> [<bg_color_map>] <out_file>"),
         }
     };
 
-    println!("{}, {}, {},", base_ascii_art, fg_color_map, bg_color_map);
-    for (a, b, c) in izip!(base_ascii_art.chars(), fg_color_map.chars(), bg_color_map.chars()) {
-        println!("{} {} {}", a, b, c);
-    };
+    if let Some(bg_color_map) = maybe_bg_color_map {
+        match all_strings_same_length(vec![&base_ascii_art, &fg_color_map, &bg_color_map]) {
+            Ok(_)    => (),
+            Err(why) => panic!("Ascii art and color maps don't have the amount\
+            of characters :\n{}\nHint : use `bat ASCII_ART | sd -p '[^ ]' '·' > FG_COLOR_MAP`
+            \ror `bat ASCII_ART | sd -p '[^ ]' '-' > BG_COLOR_MAP` to generate color map templates.
+            \r(replace fullcaps names with your file names of course)", why),
+        }
+
+    }
 }
