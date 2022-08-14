@@ -1,66 +1,95 @@
-use std::env;           // command line args
-use std::fs;            // file manipulation
-use itertools::izip;    // zip more than 2 iterators
-use colored::Colorize;  // 'cause why not
-use regex::Regex;       // mainly for replace_all method
+use std::env;      // command line args
+use std::fs;       // file manipulation
+use regex::Regex;  // mainly for replace_all method
 
 fn get_contents(file: &String) -> String {
     fs::read_to_string(file).expect(format!("Couldn't read from file `{}`", file).as_str())
 }
 
-fn nb_chars(text: &String) -> usize {
-    let text_as_vec: Vec<char> = text.chars().collect();
-    text_as_vec.len()
-}
+// Checks that color/style maps are compatible with the ascii art
+fn compatible_files(input_files: &[String]) -> Result<(), String> {
+    assert!(!input_files.is_empty());
 
-fn compatible_files(input: Vec<&String>) -> Result<(), String> {
-    assert!(!input.is_empty());
+    fn find_first_diff(string_a: &str, string_b: &str) -> Result<(), String> {
+        let mut i = 0;
+        let vec_a: Vec<char> = string_a.chars().collect();
+        let vec_b: Vec<char> = string_b.chars().collect();
 
-    // Check if every files have the same number of characters
-    let lenghts: Vec<usize> = input.iter().map(|x| nb_chars(x)).collect();
-
-    if lenghts.iter().min() == lenghts.iter().max() {
-        // Check if new_line characters match across files
-        let regexp = Regex::new(r"[^\n]").unwrap();
-        let head = regexp.replace_all(input[0], " ");
-
-        for s in input[1..].iter() {
-            if regexp.replace_all(*s, " ") != head {
-                return Err(String::from("uuu"))
-            }
+        while (vec_a.get(i), vec_b.get(i)) != (None, None) {
+            match (vec_a.get(i), vec_b.get(i)) {
+                (None, None) => (),
+                (Some(_), None) => return Err(format!(
+                        "unexpected end-of-line character at column {}", i)),
+                (None, Some(_)) => return Err(format!(
+                        "expected end-of-line character at column {}", i)),
+                (Some(a), Some(b)) =>
+                    match (a, b) {
+                        (' ', ' ') => (),
+                        ('-', '-') => (),
+                        (' ', '-') => return Err(format!(
+                                "expected white-space at column {}", i)),
+                        ('-', ' ') => return Err(format!(
+                                "unexpected white-space at column {}", i)),
+                        _ => return Err(format!(
+                                "weird character at line {}", i)),
+                    },
+            };
+            i += 1;
         };
 
         Ok(())
-    } else {
-        let mut rv_string = String::new();
-        let mut i = 1;
-        for l in lenghts.iter() {
-            rv_string.push_str(format!("Lenght of string n°{} : {}\n", i, l).as_str());
-            i += 1;
-        };
-        Err(rv_string)
     }
+
+    let file_contents: Vec<String> = input_files.iter()
+        .map(|x| get_contents(x))
+        .collect();
+
+    let re = Regex::new(r"[^ \n]").unwrap();
+    // `re.replace_all` returns a temporary, so
+    //  we extend it's lifetime with a let bind
+    let ascii_significant_chars = re.replace_all(&file_contents[0], "-");
+    let ascii_file: Vec<&str> = ascii_significant_chars.lines().collect();
+
+    for (file_index, file) in file_contents[1..].iter().enumerate() {
+        // Same here with `current_file`
+        let file_significant_chars = re.replace_all(&file, "-");
+        let current_file: Vec<&str> = file_significant_chars.lines().collect();
+
+        for (i, line) in current_file.iter().enumerate() {
+            match ascii_file.get(i) {
+                None => return Err(format!("Error: expected EOF at the end of \
+                           line {} in file {}", i, input_files[file_index + 1])),
+                Some(ascii_file_line) => {
+                    match find_first_diff(ascii_file_line, line) {
+                        Ok(_) => continue,
+                        Err(why) => return Err(format!("Error in file `{}` at line {} \
+                                    :\n{}", input_files[file_index + 1], i + 1, why)),
+                    }
+                }
+            }
+        }
+    };
+
+    Ok(())
 }
+
+const INCOMPATIBLE_FILES_ERROR_MESSAGE: &str = "
+Hint : use `bat ASCII_ART | sd -p '[^ ]' '·' > FG_COLOR_MAP`
+or `bat ASCII_ART | sd -p '[^ ]' '-' > BG_COLOR_MAP`
+to generate color map templates. (both commands work for
+style templates, replace fullcaps names with your file's name)";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let (base_ascii_art, fg_color_map, maybe_bg_color_map, out_file) = {
-        match args.len() {
-            4 => (get_contents(&args[1]), get_contents(&args[2]), None, &args[3]),
-            5 => (get_contents(&args[1]), get_contents(&args[2]), Some(get_contents(&args[3])), &args[4]),
-            _ => panic!("Wrong number of arguments, here's the correct syntax:
-    ascii_coloriser <base_ascii_art> <fg_color_map> [<bg_color_map>] <out_file>"),
-        }
-    };
-
-    if let Some(bg_color_map) = maybe_bg_color_map {
-        match compatible_files(vec![&base_ascii_art, &fg_color_map, &bg_color_map]) {
-            Ok(_)    => (),
-            Err(why) => panic!("Ascii art and color maps don't have the amount\
-            of characters :\n{}\nHint : use `bat ASCII_ART | sd -p '[^ ]' '·' > FG_COLOR_MAP`
-            \ror `bat ASCII_ART | sd -p '[^ ]' '-' > BG_COLOR_MAP` to generate color map templates.
-            \r(replace fullcaps names with your file names of course)", why),
-        }
+    // Send slice of `args` to get rid of $0
+    match compatible_files(&args[1..]) {
+        Ok(_) => (),
+        Err(why) => {
+            eprintln!("{}\n{}", why, INCOMPATIBLE_FILES_ERROR_MESSAGE);
+            std::process::exit(1);
+        },
     }
+
+    println!("Ouais ils sont bien les fichiers");
 }
